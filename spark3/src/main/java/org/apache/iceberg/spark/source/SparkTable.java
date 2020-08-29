@@ -20,6 +20,7 @@
 package org.apache.iceberg.spark.source;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
@@ -166,5 +167,22 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
   @Override
   public String toString() {
     return icebergTable.toString();
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (this == other) {
+      return true;
+    } else if (other == null || getClass() != other.getClass()) {
+      return false;
+    }
+
+    SparkTable that = (SparkTable) other;
+    return Objects.equals(icebergTable, that.icebergTable);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(icebergTable);
   }
 }

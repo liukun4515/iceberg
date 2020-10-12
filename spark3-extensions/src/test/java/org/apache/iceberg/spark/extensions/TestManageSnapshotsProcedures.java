@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.spark.extensions;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -30,11 +31,14 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.analysis.NoSuchProcedureException;
 import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import static org.apache.iceberg.TableProperties.WRITE_AUDIT_PUBLISH_ENABLED;
@@ -330,57 +334,102 @@ public class TestManageSnapshotsProcedures extends SparkExtensionsTestBase {
   }
   @Test
   public void testExpireSnapshotByRetainNum() {
+    // test the expire snapshot without 'older than timestamp', the default timestamp is current_timestamp
+
     sql("CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg", tableName);
     // create first snapshot
     sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
     Table table = validationCatalog.loadTable(tableIdent);
     Snapshot firstSnapshot = table.currentSnapshot();
-    int numSnapshot = 0;
-    for (Snapshot snapshot : table.snapshots()) {
-      numSnapshot++;
-    }
-    Assert.assertEquals(1, numSnapshot);
+
+    Assert.assertEquals(1, Lists.newArrayList(table.snapshots()).size());
     // create second snapshot
     sql("INSERT INTO TABLE %s VALUES (2, 'b')", tableName);
     sql("INSERT INTO TABLE %s VALUES (3, 'c')", tableName);
     table.refresh();
-    numSnapshot = 0;
-    Snapshot secondSnapshot = table.currentSnapshot();
-    for (Snapshot snapshot : table.snapshots()) {
-      numSnapshot++;
-    }
-    Assert.assertEquals(3, numSnapshot);
+    Assert.assertEquals(3, Lists.newArrayList(table.snapshots()).size());
 
     // expire snapshot by stored procedure
     // num of snapshot is 3
     // retain num is 2
     List<Object[]> output = sql(
-        "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
+        "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', " +
+                "retain_last => %d)",
         catalogName, tableIdent.namespace(), tableIdent.name(), 2);
-    assertEquals("return the retain num for expire snapshot",
-        ImmutableList.of(row(2)),
-        output);
-
+    Assert.assertNotNull(output.get(0));
+    Assert.assertEquals(2, output.get(0).length);
     table.refresh();
-    numSnapshot = 0;
-    for (Snapshot snapshot : table.snapshots()) {
-      numSnapshot++;
-    }
-    Assert.assertEquals(2, numSnapshot);
+    Assert.assertEquals(2, Lists.newArrayList(table.snapshots()).size());
 
     // retain num is 1
     output = sql(
         "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
         catalogName, tableIdent.namespace(), tableIdent.name(), 1);
-    assertEquals("return the retain num for expire snapshot",
-        ImmutableList.of(row(1)),
-        output);
     table.refresh();
-    numSnapshot = 0;
-    for (Snapshot snapshot : table.snapshots()) {
-      numSnapshot++;
-    }
-    Assert.assertEquals(1, numSnapshot);
+    Assert.assertEquals(1, Lists.newArrayList(table.snapshots()).size());
+  }
+
+  @Test
+  public void testExpireSnapshotByTimeStamp() {
+    sql("CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg", tableName);
+    // create first snapshot
+    sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
+    Table table = validationCatalog.loadTable(tableIdent);
+    Snapshot firstSnapshot = table.currentSnapshot();
+    Assert.assertEquals(1, Lists.newArrayList(table.snapshots()).size());
+
+    // create second snapshot
+    sql("INSERT INTO TABLE %s VALUES (2, 'b')", tableName);
+    sql("INSERT INTO TABLE %s VALUES (3, 'c')", tableName);
+    table.refresh();
+    Assert.assertEquals(3, Lists.newArrayList(table.snapshots()).size());
+
+    // expire the snapshot by invalid time
+
+    long timestamp = Timestamp.valueOf(LocalDateTime.of(10, 1, 1, 1, 1, 1).format(DATE_TIME_FORMATTER))
+            .getTime();
+    List<Object[]> output = sql(
+            "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', older_than => TIMESTAMP '%s')",
+            catalogName, tableIdent.namespace(), tableIdent.name(), new Timestamp(timestamp).toString());
+    table.refresh();
+    assertEquals("Procedure output must match",
+            ImmutableList.of(row(null, new Timestamp(timestamp))),
+            output);
+    Assert.assertEquals(3, Lists.newArrayList(table.snapshots()).size());
+
+    timestamp = firstSnapshot.timestampMillis() + 1;
+    // expire the first snapshot
+    output = sql(
+            "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', older_than => TIMESTAMP '%s')",
+            catalogName, tableIdent.namespace(), tableIdent.name(), new Timestamp(timestamp).toString());
+    table.refresh();
+    assertEquals("Procedure output must match",
+            ImmutableList.of(row(null, new Timestamp(timestamp))),
+            output);
+    Assert.assertEquals(2, Lists.newArrayList(table.snapshots()).size());
+
+    // expire all snapshot by expire time, but retain last two snapshot
+    timestamp = System.currentTimeMillis();
+    output = sql(
+            "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', " +
+                    "older_than => TIMESTAMP '%s', retain_last => 2)",
+            catalogName, tableIdent.namespace(), tableIdent.name(), new Timestamp(timestamp).toString());
+    table.refresh();
+    Assert.assertEquals(2, Lists.newArrayList(table.snapshots()).size());
+    assertEquals("Procedure output must match",
+            ImmutableList.of(row(2, new Timestamp(timestamp))),
+            output);
+    // expire all snapshot by expire time, but retain last one snapshot
+    Snapshot lastSnapshot = table.currentSnapshot();
+    output = sql(
+            "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', " +
+                    "older_than => TIMESTAMP '%s', retain_last => 1)",
+            catalogName, tableIdent.namespace(), tableIdent.name(), new Timestamp(timestamp).toString());
+    table.refresh();
+    Assert.assertEquals(1, Lists.newArrayList(table.snapshots()).size());
+    assertEquals("Procedure output must match",
+            ImmutableList.of(row(1, new Timestamp(timestamp))),
+            output);
   }
 
   @Test
@@ -393,13 +442,11 @@ public class TestManageSnapshotsProcedures extends SparkExtensionsTestBase {
     // invalid num for retain snapshot
     int numRetainSnapshot = -1;
     AssertHelpers.assertThrows("invalid retain num for snapshot",
-        IllegalArgumentException.class, String.format("Number of snapshots to retain must be at least 1, cannot be: %s", numRetainSnapshot),
+        IllegalArgumentException.class, String.format("Number of snapshots to retain must be at least 1, cannot be: %s",
+                    numRetainSnapshot),
         () -> sql("CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
             catalogName, tableIdent.namespace(), tableIdent.name(), numRetainSnapshot));
   }
-  // TODO: should we allow quoted namespaces?
-
-  // TODO: should we allow quoted namespaces?
 
   @Test
   public void testRollbackToTimestampUsingPositionalArgs() throws InterruptedException {

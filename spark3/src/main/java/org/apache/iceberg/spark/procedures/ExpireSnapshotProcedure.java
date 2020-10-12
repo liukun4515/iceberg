@@ -20,6 +20,7 @@
 package org.apache.iceberg.spark.procedures;
 
 import java.lang.invoke.MethodHandle;
+import java.sql.Timestamp;
 import java.util.Collections;
 import org.apache.iceberg.spark.MethodHandleUtil;
 import org.apache.spark.sql.Row;
@@ -35,22 +36,18 @@ public class ExpireSnapshotProcedure extends BaseProcedure {
   private static final MethodHandle METHOD_HANDLE = MethodHandleUtil.methodHandle(
       ExpireSnapshotProcedure.class,
       "expireSnapshot",
-      String.class, String.class, int.class);
+      String.class, String.class, Timestamp.class, Integer.class);
 
   private final ProcedureParameter[] parameters = new ProcedureParameter[] {
       ProcedureParameter.required("namespace", DataTypes.StringType),
       ProcedureParameter.required("table", DataTypes.StringType),
-      // TODO: support the timestamp for parse and resolver
-      // the default value is null, the null is invalid
-      // ProcedureParameter.optional("older_than", DataTypes.TimestampType, null),
-      // the default value is 0, 0 is invalid
-      // 测试部门的内容
-      ProcedureParameter.required("retain_last", DataTypes.IntegerType)
+      ProcedureParameter.optional("older_than", DataTypes.TimestampType, null),
+      ProcedureParameter.optional("retain_last", DataTypes.IntegerType, null)
   };
 
   private final StructField[] outputFields = new StructField[] {
-      new StructField("retain_last_num", DataTypes.IntegerType, true, Metadata.empty())
-      // new StructField("expire_timestamp", DataTypes.TimestampType, true, Metadata.empty())
+      new StructField("retain_last_num", DataTypes.IntegerType, true, Metadata.empty()),
+      new StructField("expire_timestamp", DataTypes.TimestampType, true, Metadata.empty())
   };
 
   private final StructType outputType = new StructType(outputFields);
@@ -60,12 +57,20 @@ public class ExpireSnapshotProcedure extends BaseProcedure {
     super(catalog);
   }
 
-  public Iterable<Row> expireSnapshot(String namespace, String tableName, int retainLastNum) {
+  public Iterable<Row> expireSnapshot(String namespace, String tableName, Timestamp timestamp, Integer retainLastNum) {
     return modifyIcebergTable(namespace, tableName, table -> {
-      table.expireSnapshots()
-          .retainLast(retainLastNum)
-          .commit();
-      Row outputRow = RowFactory.create(retainLastNum);
+      long expireTime = timestamp != null ? timestamp.getTime() : System.currentTimeMillis();
+      if (retainLastNum == null) {
+        table.expireSnapshots()
+                .expireOlderThan(expireTime)
+                .commit();
+      } else {
+        table.expireSnapshots()
+                .expireOlderThan(expireTime)
+                .retainLast(retainLastNum)
+                .commit();
+      }
+      Row outputRow = RowFactory.create(retainLastNum, timestamp);
       return Collections.singletonList(outputRow);
     });
   }

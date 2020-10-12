@@ -20,7 +20,6 @@
 package org.apache.iceberg.spark.source;
 
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;

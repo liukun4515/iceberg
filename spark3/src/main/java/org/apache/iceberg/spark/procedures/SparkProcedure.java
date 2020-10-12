@@ -24,8 +24,9 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 
 public enum SparkProcedure {
   ROLLBACK_TO_SNAPSHOT(RollbackToSnapshotProcedure::new),
+  ROLLBACK_TO_TIMESTAMP(RollbackToTimestampProcedure::new),
   CHERRYPICK_SNAPSHOT(CherrypickSnapshotProcedure::new),
-  SET_CURRENT_SNAPSHOT(SetCurrentSnapshotProcedure::new),
+  SET_CURRENT_SNAPSHOT(SetCurrentSnapshotProcedure::new);
   EXPIRE_SNAPSHOT(ExpireSnapshotProcedure::new);
 
   private final ProcedureBuilder builder;

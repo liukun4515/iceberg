@@ -33,7 +33,9 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.analysis.NoSuchProcedureException;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.Assert;
 
 import static org.apache.iceberg.TableProperties.WRITE_AUDIT_PUBLISH_ENABLED;
 
@@ -43,8 +45,12 @@ public class TestManageSnapshotsProcedures extends SparkExtensionsTestBase {
     super(catalogName, implementation, config);
   }
 
+  @Before
+  public void before() {
+    sql("DROP TABLE IF EXISTS %s", tableName);
+  }
   @After
-  public void removeTables() {
+  public void after() {
     sql("DROP TABLE IF EXISTS %s", tableName);
   }
 
@@ -320,6 +326,74 @@ public class TestManageSnapshotsProcedures extends SparkExtensionsTestBase {
         ImmutableList.of(row(1L, "a")),
         sql("SELECT * FROM %s", tableName));
   }
+  @Test
+  public void testExpireSnapshotByRetainNum() {
+    sql("CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg", tableName);
+    // create first snapshot
+    sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
+    Table table = validationCatalog.loadTable(tableIdent);
+    Snapshot firstSnapshot = table.currentSnapshot();
+    int numSnapshot = 0;
+    for (Snapshot snapshot : table.snapshots()) {
+      numSnapshot++;
+    }
+    Assert.assertEquals(1, numSnapshot);
+    // create second snapshot
+    sql("INSERT INTO TABLE %s VALUES (2, 'b')", tableName);
+    sql("INSERT INTO TABLE %s VALUES (3, 'c')", tableName);
+    table.refresh();
+    numSnapshot = 0;
+    Snapshot secondSnapshot = table.currentSnapshot();
+    for (Snapshot snapshot : table.snapshots()) {
+      numSnapshot++;
+    }
+    Assert.assertEquals(3, numSnapshot);
 
+    // expire snapshot by stored procedure
+    // num of snapshot is 3
+    // retain num is 2
+    List<Object[]> output = sql(
+        "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
+        catalogName, tableIdent.namespace(), tableIdent.name(), 2);
+    assertEquals("return the retain num for expire snapshot",
+        ImmutableList.of(row(2)),
+        output);
+
+    table.refresh();
+    numSnapshot = 0;
+    for (Snapshot snapshot : table.snapshots()) {
+      numSnapshot++;
+    }
+    Assert.assertEquals(2, numSnapshot);
+
+    // retain num is 1
+    output = sql(
+        "CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
+        catalogName, tableIdent.namespace(), tableIdent.name(), 1);
+    assertEquals("return the retain num for expire snapshot",
+        ImmutableList.of(row(1)),
+        output);
+    table.refresh();
+    numSnapshot = 0;
+    for (Snapshot snapshot : table.snapshots()) {
+      numSnapshot++;
+    }
+    Assert.assertEquals(1, numSnapshot);
+  }
+
+  @Test
+  public void testExpireSnapshotWithInvalidArgs() {
+    // invalid num for retain snapshot
+    sql("CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg", tableName);
+    // create first snapshot
+    sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
+
+    // invalid num for retain snapshot
+    int numRetainSnapshot = -1;
+    AssertHelpers.assertThrows("invalid retain num for snapshot",
+        IllegalArgumentException.class, String.format("Number of snapshots to retain must be at least 1, cannot be: %s", numRetainSnapshot),
+        () -> sql("CALL %s.system.expire_snapshot(namespace => '%s', table => '%s', retain_last => %d)",
+            catalogName, tableIdent.namespace(), tableIdent.name(), numRetainSnapshot));
+  }
   // TODO: should we allow quoted namespaces?
 }

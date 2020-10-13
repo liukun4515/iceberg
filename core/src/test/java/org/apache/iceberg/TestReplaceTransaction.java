@@ -43,12 +43,9 @@ import static org.apache.iceberg.types.Types.NestedField.required;
 
 @RunWith(Parameterized.class)
 public class TestReplaceTransaction extends TableTestBase {
-  @Parameterized.Parameters
-  public static Object[][] parameters() {
-    return new Object[][] {
-        new Object[] { 1 },
-        new Object[] { 2 },
-    };
+  @Parameterized.Parameters(name = "formatVersion = {0}")
+  public static Object[] parameters() {
+    return new Object[] { 1, 2 };
   }
 
   public TestReplaceTransaction(int formatVersion) {
@@ -150,7 +147,7 @@ public class TestReplaceTransaction extends TableTestBase {
     Assert.assertEquals("Version should be 2", 2L, (long) version());
     Assert.assertNull("Table should not have a current snapshot", table.currentSnapshot());
     Assert.assertEquals("Schema should use new schema, not compatible with previous",
-        new Schema(required(1, "obj_id", Types.IntegerType.get())).asStruct(),
+        new Schema(required(3, "obj_id", Types.IntegerType.get())).asStruct(),
         table.schema().asStruct());
   }
 

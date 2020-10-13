@@ -19,11 +19,14 @@
 
 package org.apache.iceberg.hadoop;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Map;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.MetadataTableType;
 import org.apache.iceberg.MetadataTableUtils;
 import org.apache.iceberg.PartitionSpec;
@@ -73,14 +76,14 @@ public class HadoopTables implements Tables, Configurable {
 
     if (parsedMetadataType != null) {
       // Load a metadata table
-      result = loadMetadataTable(parsedMetadataType.first(), parsedMetadataType.second());
+      result = loadMetadataTable(parsedMetadataType.first(), location, parsedMetadataType.second());
     } else {
       // Load a normal table
       TableOperations ops = newTableOps(location);
       if (ops.current() != null) {
         result = new BaseTable(ops, location);
       } else {
-        throw new NoSuchTableException("Table does not exist at location: " + location);
+        throw new NoSuchTableException("Table does not exist at location: %s", location);
       }
     }
 
@@ -96,7 +99,7 @@ public class HadoopTables implements Tables, Configurable {
    */
   private Pair<String, MetadataTableType> parseMetadataType(String location) {
     int hashIndex = location.lastIndexOf('#');
-    if (hashIndex != -1 & !location.endsWith("#")) {
+    if (hashIndex != -1 && !location.endsWith("#")) {
       String baseTable = location.substring(0, hashIndex);
       String metaTable = location.substring(hashIndex + 1);
       MetadataTableType type = MetadataTableType.from(metaTable);
@@ -106,13 +109,13 @@ public class HadoopTables implements Tables, Configurable {
     }
   }
 
-  private Table loadMetadataTable(String location, MetadataTableType type) {
+  private Table loadMetadataTable(String location, String metadataTableName, MetadataTableType type) {
     TableOperations ops = newTableOps(location);
     if (ops.current() == null) {
-      throw new NoSuchTableException("Table does not exist at location: " + location);
+      throw new NoSuchTableException("Table does not exist at location: %s", location);
     }
 
-    return MetadataTableUtils.createMetadataTableInstance(ops, location, type);
+    return MetadataTableUtils.createMetadataTableInstance(ops, location, metadataTableName, type);
   }
 
   /**
@@ -132,7 +135,7 @@ public class HadoopTables implements Tables, Configurable {
 
     TableOperations ops = newTableOps(location);
     if (ops.current() != null) {
-      throw new AlreadyExistsException("Table already exists at location: " + location);
+      throw new AlreadyExistsException("Table already exists at location: %s", location);
     }
 
     Map<String, String> tableProps = properties == null ? ImmutableMap.of() : properties;
@@ -142,6 +145,50 @@ public class HadoopTables implements Tables, Configurable {
     ops.commit(null, metadata);
 
     return new BaseTable(ops, location);
+  }
+
+  /**
+   * Drop a table and delete all data and metadata files.
+   *
+   * @param location a path URI (e.g. hdfs:///warehouse/my_table)
+   * @return true if the table was dropped, false if it did not exist
+   */
+  public boolean dropTable(String location) {
+    return dropTable(location, true);
+  }
+
+  /**
+   * Drop a table; optionally delete data and metadata files.
+   * <p>
+   * If purge is set to true the implementation should delete all data and metadata files.
+   *
+   * @param location a path URI (e.g. hdfs:///warehouse/my_table)
+   * @param purge if true, delete all data and metadata files in the table
+   * @return true if the table was dropped, false if it did not exist
+   */
+  public boolean dropTable(String location, boolean purge) {
+    TableOperations ops = newTableOps(location);
+    TableMetadata lastMetadata = null;
+    if (ops.current() != null) {
+      if (purge) {
+        lastMetadata = ops.current();
+      }
+    } else {
+      return false;
+    }
+
+    try {
+      if (purge && lastMetadata != null) {
+        // Since the data files and the metadata files may store in different locations,
+        // so it has to call dropTableData to force delete the data file.
+        CatalogUtil.dropTableData(ops.io(), lastMetadata);
+      }
+      Path tablePath = new Path(location);
+      Util.getFs(tablePath, conf).delete(tablePath, true /* recursive */);
+      return true;
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to delete file: " + location, e);
+    }
   }
 
   @VisibleForTesting

@@ -129,18 +129,18 @@ public abstract class BaseMetastoreCatalog implements Catalog {
   }
 
   private Table loadMetadataTable(TableIdentifier identifier) {
-    String name = identifier.name();
-    MetadataTableType type = MetadataTableType.from(name);
+    String tableName = identifier.name();
+    MetadataTableType type = MetadataTableType.from(tableName);
     if (type != null) {
       TableIdentifier baseTableIdentifier = TableIdentifier.of(identifier.namespace().levels());
       TableOperations ops = newTableOps(baseTableIdentifier);
       if (ops.current() == null) {
-        throw new NoSuchTableException("Table does not exist: " + baseTableIdentifier);
+        throw new NoSuchTableException("Table does not exist: %s", baseTableIdentifier);
       }
 
-      return MetadataTableUtils.createMetadataTableInstance(ops, baseTableIdentifier, type);
+      return MetadataTableUtils.createMetadataTableInstance(ops, name(), baseTableIdentifier, identifier, type);
     } else {
-      throw new NoSuchTableException("Table does not exist: " + identifier);
+      throw new NoSuchTableException("Table does not exist: %s", identifier);
     }
   }
 
@@ -158,8 +158,6 @@ public abstract class BaseMetastoreCatalog implements Catalog {
   public String toString() {
     return getClass().getSimpleName() + "(" + name() + ")";
   }
-
-  protected abstract String name();
 
   protected abstract TableOperations newTableOps(TableIdentifier tableIdentifier);
 
@@ -216,7 +214,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
     public Table create() {
       TableOperations ops = newTableOps(identifier);
       if (ops.current() != null) {
-        throw new AlreadyExistsException("Table already exists: " + identifier);
+        throw new AlreadyExistsException("Table already exists: %s", identifier);
       }
 
       String baseLocation = location != null ? location : defaultWarehouseLocation(identifier);
@@ -226,7 +224,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
       try {
         ops.commit(null, metadata);
       } catch (CommitFailedException ignored) {
-        throw new AlreadyExistsException("Table was created concurrently: " + identifier);
+        throw new AlreadyExistsException("Table was created concurrently: %s", identifier);
       }
 
       return new BaseTable(ops, fullTableName(name(), identifier));
@@ -236,7 +234,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
     public Transaction createTransaction() {
       TableOperations ops = newTableOps(identifier);
       if (ops.current() != null) {
-        throw new AlreadyExistsException("Table already exists: " + identifier);
+        throw new AlreadyExistsException("Table already exists: %s", identifier);
       }
 
       String baseLocation = location != null ? location : defaultWarehouseLocation(identifier);
@@ -258,7 +256,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
     private Transaction newReplaceTableTransaction(boolean orCreate) {
       TableOperations ops = newTableOps(identifier);
       if (!orCreate && ops.current() == null) {
-        throw new NoSuchTableException("No such table: " + identifier);
+        throw new NoSuchTableException("No such table: %s", identifier);
       }
 
       TableMetadata metadata;
@@ -286,7 +284,9 @@ public abstract class BaseMetastoreCatalog implements Catalog {
    *
    * @param io a FileIO to use for deletes
    * @param metadata the last valid TableMetadata instance for a dropped table.
+   * @deprecated will be removed in 0.11.0; use CatalogUtil.dropTableData instead.
    */
+  @Deprecated
   protected static void dropTableData(FileIO io, TableMetadata metadata) {
     // Reads and deletes are done using Tasks.foreach(...).suppressFailureWhenFinished to complete
     // as much of the delete work as possible and avoid orphaned data or manifest files.
@@ -324,6 +324,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
         .run(io::deleteFile);
   }
 
+  @SuppressWarnings("DangerousStringInternUsage")
   private static void deleteFiles(FileIO io, Set<ManifestFile> allManifests) {
     // keep track of deleted files in a map that can be cleaned up when memory runs low
     Map<String, Boolean> deletedFiles = new MapMaker()
@@ -351,7 +352,7 @@ public abstract class BaseMetastoreCatalog implements Catalog {
               }
             }
           } catch (IOException e) {
-            throw new RuntimeIOException(e, "Failed to read manifest file: " + manifest.path());
+            throw new RuntimeIOException(e, "Failed to read manifest file: %s", manifest.path());
           }
         });
   }

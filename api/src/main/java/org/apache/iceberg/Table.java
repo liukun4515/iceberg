@@ -31,6 +31,15 @@ import org.apache.iceberg.io.LocationProvider;
 public interface Table {
 
   /**
+   * Return the full name for this table.
+   *
+   * @return this table's name
+   */
+  default String name() {
+    return toString();
+  }
+
+  /**
    * Refresh the current table metadata.
    */
   void refresh();
@@ -243,18 +252,17 @@ public interface Table {
   Transaction newTransaction();
 
   /**
-   * @return a {@link FileIO} to read and write table data and metadata files
+   * Returns a {@link FileIO} to read and write table data and metadata files.
    */
   FileIO io();
 
   /**
-   * @return an {@link org.apache.iceberg.encryption.EncryptionManager} to encrypt and decrypt
-   * data files.
+   * Returns an {@link org.apache.iceberg.encryption.EncryptionManager} to encrypt and decrypt data files.
    */
   EncryptionManager encryption();
 
   /**
-   * @return a {@link LocationProvider} to provide locations for new data files
+   * Returns a {@link LocationProvider} to provide locations for new data files.
    */
   LocationProvider locationProvider();
 }

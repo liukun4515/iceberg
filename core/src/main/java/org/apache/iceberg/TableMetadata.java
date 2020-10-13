@@ -491,6 +491,43 @@ public class TableMetadata implements Serializable {
         currentSnapshotId, snapshots, snapshotLog, addPreviousFile(file, lastUpdatedMillis));
   }
 
+  public TableMetadata updateSortOrder(SortOrder newOrder) {
+    SortOrder.checkCompatibility(newOrder, schema);
+
+    // determine the next order id
+    int newOrderId = INITIAL_SORT_ORDER_ID;
+    for (SortOrder order : sortOrders) {
+      if (order.sameOrder(newOrder)) {
+        newOrderId = order.orderId();
+        break;
+      } else if (newOrderId <= order.orderId()) {
+        newOrderId = order.orderId() + 1;
+      }
+    }
+
+    if (newOrderId == defaultSortOrderId) {
+      return this;
+    }
+
+    ImmutableList.Builder<SortOrder> builder = ImmutableList.builder();
+    builder.addAll(sortOrders);
+
+    if (!sortOrdersById.containsKey(newOrderId)) {
+      if (newOrder.isUnsorted()) {
+        newOrderId = SortOrder.unsorted().orderId();
+        builder.add(SortOrder.unsorted());
+      } else {
+        // rebuild the sort order using new column ids
+        builder.add(freshSortOrder(newOrderId, schema, newOrder));
+      }
+    }
+
+    return new TableMetadata(null, formatVersion, uuid, location,
+        lastSequenceNumber, System.currentTimeMillis(), lastColumnId, schema, defaultSpecId, specs,
+        newOrderId, builder.build(), properties, currentSnapshotId, snapshots, snapshotLog,
+        addPreviousFile(file, lastUpdatedMillis));
+  }
+
   public TableMetadata addStagedSnapshot(Snapshot snapshot) {
     ValidationException.check(formatVersion == 1 || snapshot.sequenceNumber() > lastSequenceNumber,
         "Cannot add snapshot with sequence number %s older than last sequence number %s",
@@ -622,32 +659,26 @@ public class TableMetadata implements Serializable {
     ValidationException.check(formatVersion > 1 || PartitionSpec.hasSequentialIds(updatedPartitionSpec),
         "Spec does not use sequential IDs that are required in v1: %s", updatedPartitionSpec);
 
-    AtomicInteger nextLastColumnId = new AtomicInteger(0);
-    Schema freshSchema = TypeUtil.assignFreshIds(updatedSchema, nextLastColumnId::incrementAndGet);
+    AtomicInteger newLastColumnId = new AtomicInteger(lastColumnId);
+    Schema freshSchema = TypeUtil.assignFreshIds(updatedSchema, schema, newLastColumnId::incrementAndGet);
 
-    int nextSpecId = TableMetadata.INITIAL_SPEC_ID;
-    for (Integer specId : specsById.keySet()) {
-      if (nextSpecId <= specId) {
-        nextSpecId = specId + 1;
-      }
-    }
+    // determine the next spec id
+    OptionalInt maxSpecId = specs.stream().mapToInt(PartitionSpec::specId).max();
+    int nextSpecId = maxSpecId.orElse(TableMetadata.INITIAL_SPEC_ID) + 1;
 
     // rebuild the partition spec using the new column ids
     PartitionSpec freshSpec = freshSpec(nextSpecId, freshSchema, updatedPartitionSpec);
 
     // if the spec already exists, use the same ID. otherwise, use 1 more than the highest ID.
-    int specId = nextSpecId;
-    for (PartitionSpec spec : specs) {
-      if (freshSpec.compatibleWith(spec)) {
-        specId = spec.specId();
-        break;
-      }
-    }
+    int specId = specs.stream()
+        .filter(freshSpec::compatibleWith)
+        .findFirst()
+        .map(PartitionSpec::specId)
+        .orElse(nextSpecId);
 
-    ImmutableList.Builder<PartitionSpec> builder = ImmutableList.<PartitionSpec>builder()
-        .addAll(specs);
+    ImmutableList.Builder<PartitionSpec> specListBuilder = ImmutableList.<PartitionSpec>builder().addAll(specs);
     if (!specsById.containsKey(specId)) {
-      builder.add(freshSpec);
+      specListBuilder.add(freshSpec);
     }
 
     // determine the next order id
@@ -674,8 +705,8 @@ public class TableMetadata implements Serializable {
     newProperties.putAll(updatedProperties);
 
     return new TableMetadata(null, formatVersion, uuid, newLocation,
-        lastSequenceNumber, System.currentTimeMillis(), nextLastColumnId.get(), freshSchema,
-        specId, builder.build(), orderId, sortOrdersBuilder.build(), ImmutableMap.copyOf(newProperties),
+        lastSequenceNumber, System.currentTimeMillis(), newLastColumnId.get(), freshSchema,
+        specId, specListBuilder.build(), orderId, sortOrdersBuilder.build(), ImmutableMap.copyOf(newProperties),
         -1, snapshots, ImmutableList.of(), addPreviousFile(file, lastUpdatedMillis, newProperties));
   }
 

@@ -79,6 +79,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     return modifyIcebergTable(namespace, tableName, icebergTable -> {
       RemoveOrphanFilesAction action = Actions.forTable(icebergTable).removeOrphanFiles();
       if (dryRun) {
+        // do nothing for delete function
         action.deleteWith(s -> { });
       }
       List<String> result = action.olderThan(olderThan.getTime())

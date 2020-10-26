@@ -29,6 +29,7 @@ import org.apache.iceberg.StaticTableOperations;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.io.ClosingIterator;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -98,6 +99,21 @@ abstract class BaseAction<R> implements Action<R> {
     return otherMetadataFiles;
   }
 
+  private Dataset<Row> buildDataset(SparkSession spark, String tableIdentifier) {
+    TableIdentifier identifier = TableIdentifier.of(tableIdentifier);
+    if (identifier.hasNamespace() && identifier.namespace().level(0).equals("spark_catalog")) {
+      // remove spark_catalog from `tableIdentifier`
+      tableIdentifier = tableIdentifier.substring("spark_catalog.".length());
+    }
+    if (identifier.hasNamespace()) {
+      // if the catalog name is `spark_catalog`, the format of table identifier is `db.table`
+      // if the catalog name is not `spark_catalog`, the format of table identifier is `catalog_name.db.table`
+      return spark.table(tableIdentifier);
+    } else {
+      return spark.read().format("iceberg").load(tableIdentifier);
+    }
+  }
+
   protected Dataset<Row> buildValidDataFileDF(SparkSession spark) {
     return buildValidDataFileDF(spark, table().name());
   }
@@ -107,7 +123,7 @@ abstract class BaseAction<R> implements Action<R> {
     Broadcast<FileIO> ioBroadcast = context.broadcast(SparkUtil.serializableFileIO(table()));
     String allManifestsMetadataTable = metadataTableName(tableName, MetadataTableType.ALL_MANIFESTS);
 
-    Dataset<ManifestFileBean> allManifests = spark.read().format("iceberg").load(allManifestsMetadataTable)
+    Dataset<ManifestFileBean> allManifests = buildDataset(spark, allManifestsMetadataTable)
         .selectExpr("path", "length", "partition_spec_id as partitionSpecId", "added_snapshot_id as addedSnapshotId")
         .dropDuplicates("path")
         .repartition(spark.sessionState().conf().numShufflePartitions()) // avoid adaptive execution combining tasks
@@ -118,7 +134,7 @@ abstract class BaseAction<R> implements Action<R> {
 
   protected Dataset<Row> buildManifestFileDF(SparkSession spark, String tableName) {
     String allManifestsMetadataTable = metadataTableName(tableName, MetadataTableType.ALL_MANIFESTS);
-    return spark.read().format("iceberg").load(allManifestsMetadataTable).selectExpr("path as file_path");
+    return buildDataset(spark, allManifestsMetadataTable).selectExpr("path as file_path");
   }
 
   protected Dataset<Row> buildManifestListDF(SparkSession spark, Table table) {

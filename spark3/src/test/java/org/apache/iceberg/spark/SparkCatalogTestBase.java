@@ -56,15 +56,15 @@ public abstract class SparkCatalogTestBase extends SparkTestBase {
   @Parameterized.Parameters(name = "catalogName = {0}, implementation = {1}, config = {2}")
   public static Object[][] parameters() {
     return new Object[][] {
-        { "testhive", SparkCatalog.class.getName(),
-          ImmutableMap.of(
-            "type", "hive",
-            "default-namespace", "default"
-         ) },
-        { "testhadoop", SparkCatalog.class.getName(),
-          ImmutableMap.of(
-            "type", "hadoop"
-        ) },
+        // { "testhive", SparkCatalog.class.getName(),
+        //   ImmutableMap.of(
+        //     "type", "hive",
+        //     "default-namespace", "default"
+        //  ) },
+        // { "testhadoop", SparkCatalog.class.getName(),
+        //   ImmutableMap.of(
+        //     "type", "hadoop"
+        // ) },
         { "spark_catalog", SparkSessionCatalog.class.getName(),
           ImmutableMap.of(
             "type", "hive",

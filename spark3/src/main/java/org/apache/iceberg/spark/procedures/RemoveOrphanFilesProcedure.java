@@ -63,8 +63,8 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
   private final StructField[] outputParameters = new StructField[] {
       new StructField("table", DataTypes.StringType, false, Metadata.empty()),
       new StructField("older_than", DataTypes.TimestampType, false, Metadata.empty()),
-      new StructField("remove_file_list", DataTypes.createArrayType(DataTypes.StringType, false),
-      false, Metadata.empty()),
+//      new StructField("remove_file_list", DataTypes.createArrayType(DataTypes.StringType, false),
+//      false, Metadata.empty()),
       new StructField("dry_run", DataTypes.BooleanType, false, Metadata.empty())
   };
 
@@ -85,7 +85,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
       List<String> result = action.olderThan(olderThan.getTime())
           .execute();
 
-      Row outputRow = RowFactory.create(tableName, olderThan, result);
+      Row outputRow = RowFactory.create(tableName, olderThan, dryRun);
       return Collections.singletonList(outputRow);
     });
   }

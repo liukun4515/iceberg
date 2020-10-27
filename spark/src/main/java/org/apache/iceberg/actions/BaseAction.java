@@ -106,8 +106,8 @@ abstract class BaseAction<R> implements Action<R> {
     JavaSparkContext context = new JavaSparkContext(spark.sparkContext());
     Broadcast<FileIO> ioBroadcast = context.broadcast(SparkUtil.serializableFileIO(table()));
     String allManifestsMetadataTable = metadataTableName(tableName, MetadataTableType.ALL_MANIFESTS);
-
     Dataset<ManifestFileBean> allManifests = spark.read().format("iceberg").load(allManifestsMetadataTable)
+//    Dataset<ManifestFileBean> allManifests = spark.table(allManifestsMetadataTable)
         .selectExpr("path", "length", "partition_spec_id as partitionSpecId", "added_snapshot_id as addedSnapshotId")
         .dropDuplicates("path")
         .repartition(spark.sessionState().conf().numShufflePartitions()) // avoid adaptive execution combining tasks
@@ -118,7 +118,8 @@ abstract class BaseAction<R> implements Action<R> {
 
   protected Dataset<Row> buildManifestFileDF(SparkSession spark, String tableName) {
     String allManifestsMetadataTable = metadataTableName(tableName, MetadataTableType.ALL_MANIFESTS);
-    return spark.read().format("iceberg").load(allManifestsMetadataTable).selectExpr("path as file_path");
+    return spark.table(allManifestsMetadataTable).selectExpr("path as file_path");
+//    return spark.read().format("iceberg").load(allManifestsMetadataTable).selectExpr("path as file_path");
   }
 
   protected Dataset<Row> buildManifestListDF(SparkSession spark, Table table) {

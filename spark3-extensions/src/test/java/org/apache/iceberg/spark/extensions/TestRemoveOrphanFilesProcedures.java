@@ -63,7 +63,7 @@ public class TestRemoveOrphanFilesProcedures extends SparkExtensionsTestBase{
                     "older_than => TIMESTAMP '%s', dry_run => %s)",
             catalogName, tableIdent.namespace(), tableIdent.name(), timestamp.toString(), Boolean.FALSE);
     Assert.assertEquals(1, output.size());
-    Assert.assertEquals(4, output.get(0).length);
+    Assert.assertEquals(3, output.get(0).length);
     Assert.assertEquals(String.valueOf(output.get(0)[0]), tableIdent.name());
   }
 
